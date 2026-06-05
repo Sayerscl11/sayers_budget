@@ -20,3 +20,6 @@ export type { WeeklySpend, CategorySpend } from './weeklySpend';
 
 export { savingsProgress } from './savings';
 export type { SavingsProgress } from './savings';
+
+export { forecast, defaultForecastItems } from './forecast';
+export type { ForecastInput, DashboardForecast } from './forecast';

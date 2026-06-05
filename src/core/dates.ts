@@ -84,6 +84,14 @@ export function isWithin(iso: string, range: DateRange): boolean {
   return iso >= range.start && iso <= range.end;
 }
 
+/** The [first, last] calendar day of the month containing `iso`. */
+export function monthRangeContaining(iso: string): DateRange {
+  const dt = parseISO(iso);
+  const start = new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), 1));
+  const end = new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth() + 1, 0));
+  return { start: formatISO(start), end: formatISO(end) };
+}
+
 /** Median of the gaps (in days) between consecutive sorted dates. */
 export function medianGapDays(isoDates: string[]): number {
   if (isoDates.length < 2) return 0;
