@@ -23,8 +23,21 @@ describe('forecast — the dashboard backbone over 5 real statements', () => {
     expect(perWeekCents).toBe(Math.floor(netCents / weeks));
   });
 
-  it('defaults the forecast window to the month containing today', () => {
-    expect(result.period).toEqual({ start: '2025-12-01', end: '2025-12-31' });
+  it('defaults to a normalized 12-month forecast window', () => {
+    // Anchored at the first of the current month, spanning a full year, so
+    // paycheck timing within any single month can't skew the weekly number.
+    expect(result.period).toEqual({ start: '2025-12-01', end: '2026-11-30' });
+  });
+
+  it('weekly number is stable regardless of which month "today" lands in', () => {
+    // The whole point: a 2-paycheck month and a 3-paycheck month must not move
+    // the headline. Compute across several "todays" and require tight spread.
+    const perWeek = ['2025-12-15', '2026-01-15', '2026-03-15', '2026-05-30'].map(
+      (today) => forecast({ txns, accounts, household, today }).perWeekCents,
+    );
+    const spread = Math.max(...perWeek) - Math.min(...perWeek);
+    expect(spread).toBeLessThan(50_00); // within ~$50/wk across the year
+    expect(Math.min(...perWeek)).toBeGreaterThan(0); // and reliably positive
   });
 
   it('reports the current household week (Mon-start) for today', () => {
