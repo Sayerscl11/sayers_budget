@@ -23,3 +23,6 @@ export type { SavingsProgress } from './savings';
 
 export { forecast, defaultForecastItems, normalizedForecastWindow } from './forecast';
 export type { ForecastInput, DashboardForecast } from './forecast';
+
+export { buildRecurringRows, rowsToForecastItems } from './recurringPlan';
+export type { RecurringOverride, RecurringRow } from './recurringPlan';

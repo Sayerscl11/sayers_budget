@@ -1,6 +1,12 @@
-import { forecast } from '@core/engine';
+import {
+  forecast,
+  detectRecurring,
+  buildRecurringRows,
+  rowsToForecastItems,
+} from '@core/engine';
 import { formatCurrency } from '@core/money';
 import { loadBudgetData } from '@/lib/data/source';
+import { loadRecurringOverrides } from '@/lib/data/recurring';
 import { WeeklyProgress } from '@/components/dashboard/WeeklyProgress';
 import { BreakdownSheet } from '@/components/dashboard/BreakdownSheet';
 
@@ -18,8 +24,16 @@ function prettyRange(start: string, end: string): string {
 }
 
 export default async function DashboardPage() {
-  const { txns, accounts, household, today } = await loadBudgetData();
-  const f = forecast({ txns, accounts, household, today });
+  const [{ txns, accounts, household, today }, overrides] = await Promise.all([
+    loadBudgetData(),
+    loadRecurringOverrides(),
+  ]);
+  // The forecast honors the user's confirmed/edited recurring items; with none
+  // saved this is identical to pure detection.
+  const recurringItems = rowsToForecastItems(
+    buildRecurringRows(detectRecurring(txns, accounts), overrides),
+  );
+  const f = forecast({ txns, accounts, household, today, recurringItems });
   const { perWeekCents, weekly, safeToSpend, savings, week } = f;
 
   return (
