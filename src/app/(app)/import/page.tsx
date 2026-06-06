@@ -1,131 +1,138 @@
 'use client';
 
-import { useState } from 'react';
-import { Loader2 } from 'lucide-react';
-import { formatCurrency } from '@core/money';
-
-interface PreviewRow {
-  postedDate: string;
-  descriptionRaw: string;
-  label: string | null;
-  amountCents: number;
-  accountMask: string;
-  needsReview: boolean;
-}
-interface Preview {
-  accounts: { mask: string; name: string; role: string }[];
-  warnings: string[];
-  count: number;
-  transactions: PreviewRow[];
-}
+import { useActionState, useRef, useState } from 'react';
+import { Loader2, FileUp, CheckCircle2 } from 'lucide-react';
+import { importStatement, type ImportResult } from './actions';
 
 export default function ImportPage() {
-  const [text, setText] = useState('');
-  const [preview, setPreview] = useState<Preview | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  async function runPreview() {
-    setLoading(true);
-    setError(null);
-    setPreview(null);
-    try {
-      const res = await fetch('/api/import/preview', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? 'Failed to parse');
-      setPreview(data);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to parse');
-    } finally {
-      setLoading(false);
-    }
-  }
+  const [state, formAction, pending] = useActionState<ImportResult, FormData>(
+    importStatement,
+    {},
+  );
+  const [fileName, setFileName] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   return (
     <div className="px-4 py-6">
       <h1 className="mb-1 text-lg font-semibold text-slate-900">Import a statement</h1>
       <p className="mb-4 text-xs text-slate-400">
-        Paste the text of a Capital One 360 statement to preview the transactions.
-        PDF upload and save-to-ledger arrive with the database layer.
+        Upload a Capital One 360 PDF. Transactions are parsed, de-duplicated against
+        what’s already saved, and added to your ledger.
       </p>
 
-      <textarea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        placeholder="Paste statement text here…"
-        rows={6}
-        className="w-full resize-y rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-800 outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
-      />
+      <form action={formAction} className="space-y-3">
+        <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-200 bg-white px-4 py-8 text-center hover:border-brand/50">
+          <FileUp size={24} className="text-slate-400" />
+          <span className="text-sm font-medium text-slate-600">
+            {fileName ?? 'Choose a PDF statement'}
+          </span>
+          <span className="text-[11px] text-slate-400">Tap to browse</span>
+          <input
+            ref={fileRef}
+            type="file"
+            name="file"
+            accept="application/pdf,.pdf"
+            className="hidden"
+            onChange={(e) => setFileName(e.target.files?.[0]?.name ?? null)}
+          />
+        </label>
 
-      <button
-        onClick={runPreview}
-        disabled={loading || text.trim().length === 0}
-        className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-brand py-3 text-sm font-semibold text-white disabled:opacity-40"
-      >
-        {loading && <Loader2 size={16} className="animate-spin" />}
-        {loading ? 'Parsing…' : 'Preview transactions'}
-      </button>
+        <details className="rounded-xl bg-white p-3 text-sm ring-1 ring-slate-100">
+          <summary className="cursor-pointer text-slate-500">
+            Or paste statement text
+          </summary>
+          <textarea
+            name="text"
+            rows={5}
+            placeholder="Paste statement text…"
+            className="mt-2 w-full resize-y rounded-lg border border-slate-200 p-2 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
+          />
+        </details>
 
-      {error && (
-        <p className="mt-3 rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</p>
+        <button
+          type="submit"
+          disabled={pending}
+          className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand py-3 text-sm font-semibold text-white disabled:opacity-40"
+        >
+          {pending && <Loader2 size={16} className="animate-spin" />}
+          {pending ? 'Working…' : 'Import statement'}
+        </button>
+      </form>
+
+      {state.error && (
+        <p className="mt-3 rounded-xl bg-red-50 p-3 text-sm text-red-700">{state.error}</p>
       )}
 
-      {preview && (
-        <div className="mt-5 space-y-4">
-          <div className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">
-            Parsed <strong>{preview.count}</strong> transactions across{' '}
-            <strong>{preview.accounts.length}</strong> account
-            {preview.accounts.length === 1 ? '' : 's'}.
-          </div>
+      {(state.summary || state.saved === false) && <ResultCard state={state} />}
+    </div>
+  );
+}
 
-          {preview.warnings.length > 0 && (
-            <details className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
-              <summary className="cursor-pointer font-medium">
-                {preview.warnings.length} parser warning
-                {preview.warnings.length === 1 ? '' : 's'}
-              </summary>
-              <ul className="mt-2 list-disc pl-5 text-xs">
-                {preview.warnings.slice(0, 20).map((w, i) => (
-                  <li key={i}>{w}</li>
-                ))}
-              </ul>
-            </details>
+function ResultCard({ state }: { state: ImportResult }) {
+  const s = state.summary;
+  return (
+    <div className="mt-5 space-y-3">
+      <div className="flex items-start gap-2 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">
+        <CheckCircle2 size={18} className="mt-0.5 shrink-0" />
+        <div>
+          {state.saved ? (
+            s?.alreadyImported ? (
+              <p>This statement was already imported — nothing to add.</p>
+            ) : (
+              <p>
+                Saved <strong>{s?.inserted ?? 0} new</strong>
+                {s && s.superseded > 0 && <> · {s.superseded} merged</>}
+                {s && s.skipped > 0 && <> · {s.skipped} already there</>} across{' '}
+                {state.accounts} account{state.accounts === 1 ? '' : 's'}.
+              </p>
+            )
+          ) : (
+            <p>
+              Parsed <strong>{state.parsed}</strong> transactions across{' '}
+              {state.accounts} account{state.accounts === 1 ? '' : 's'}.{' '}
+              <span className="text-emerald-700/70">
+                (Demo mode — not saved. Go live to persist.)
+              </span>
+            </p>
           )}
-
-          <ul className="divide-y divide-slate-100 rounded-xl bg-white ring-1 ring-slate-100">
-            {preview.transactions.slice(0, 50).map((t, i) => (
-              <li key={i} className="flex items-center gap-3 px-4 py-2.5">
-                <span className="w-14 shrink-0 text-[11px] text-slate-400">
-                  {t.postedDate.slice(5)}
-                </span>
-                <span className="min-w-0 flex-1 truncate text-sm text-slate-700">
-                  {t.label || t.descriptionRaw}
-                  {t.needsReview && (
-                    <span className="ml-2 rounded bg-amber-100 px-1.5 text-[10px] text-amber-800">
-                      review
-                    </span>
-                  )}
-                </span>
-                <span
-                  className={`shrink-0 text-sm font-medium tabular-nums ${
-                    t.amountCents < 0 ? 'text-slate-900' : 'text-emerald-600'
-                  }`}
-                >
-                  {formatCurrency(t.amountCents)}
-                </span>
-              </li>
-            ))}
-          </ul>
-          {preview.count > 50 && (
-            <p className="text-center text-xs text-slate-400">
-              Showing first 50 of {preview.count}.
+          {s && s.needsReview > 0 && (
+            <p className="mt-1 text-amber-700">
+              {s.needsReview} row{s.needsReview === 1 ? '' : 's'} flagged for review.
             </p>
           )}
         </div>
+      </div>
+
+      {state.sample && state.sample.length > 0 && (
+        <ul className="divide-y divide-slate-100 rounded-xl bg-white ring-1 ring-slate-100">
+          {state.sample.map((r, i) => (
+            <li key={i} className="flex items-center gap-3 px-4 py-2.5">
+              <span className="w-12 shrink-0 text-[11px] text-slate-400">
+                {r.date.slice(5)}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-sm text-slate-700">
+                {r.desc}
+              </span>
+              <span className="shrink-0 text-sm font-medium tabular-nums text-slate-900">
+                {r.amount}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {state.warnings && state.warnings.length > 0 && (
+        <details className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
+          <summary className="cursor-pointer font-medium">
+            {state.warnings.length} parser warning
+            {state.warnings.length === 1 ? '' : 's'}
+          </summary>
+          <ul className="mt-2 list-disc pl-5 text-xs">
+            {state.warnings.slice(0, 20).map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+        </details>
       )}
     </div>
   );
