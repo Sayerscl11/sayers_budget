@@ -4,6 +4,7 @@
 
 import type { AccountRef, HouseholdConfig, Txn } from '@core/types';
 import { loadDemoData } from './demo';
+import { useSupabaseData } from '../env';
 
 export interface BudgetData {
   txns: Txn[];
@@ -21,5 +22,10 @@ export interface BudgetData {
  * (parse -> engine -> dashboard) is exercised end-to-end.
  */
 export async function loadBudgetData(): Promise<BudgetData> {
+  if (useSupabaseData()) {
+    // Lazy import so the demo build never pulls in next/headers (request-scoped).
+    const { loadSupabaseData } = await import('./supabase');
+    return loadSupabaseData();
+  }
   return loadDemoData();
 }
