@@ -38,8 +38,12 @@ export async function importStatement(
     filename = file.name;
     try {
       text = await extractText(buf);
-    } catch {
-      return { error: 'Could not read that PDF. Try the text-paste option below.' };
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : 'unknown error';
+      console.error('[import] PDF extraction failed:', e);
+      return {
+        error: `Could not read that PDF (${detail}). Try the text-paste option below.`,
+      };
     }
   } else if (pasted.trim()) {
     text = pasted;
