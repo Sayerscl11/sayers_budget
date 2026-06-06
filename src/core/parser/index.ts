@@ -3,7 +3,7 @@
 // returns normalized transactions. Pure & deterministic — testable from .txt
 // fixtures with no PDF runtime.
 
-import type { AccountRole } from '../types';
+import type { AccountRole, Txn } from '../types';
 import { parseRow } from './fields';
 import { extractLabel, normalizeDescription } from './normalize';
 import { buildDedupeKey } from './dedupeKey';
@@ -58,6 +58,28 @@ function roleForAccount(name: string): AccountRole {
   if (n.includes('debit card')) return 'spending_pool';
   if (n.includes('checking')) return 'main';
   return 'other';
+}
+
+/**
+ * Bridge parser output to the engine's `Txn` shape. The engine needs a stable
+ * `id` per transaction; callers supply a prefix (a DB id at runtime, the source
+ * filename in tests) so ids are deterministic and traceable to their origin.
+ */
+export function rawTxnsToTxns(raw: RawTxn[], idPrefix = 'raw'): Txn[] {
+  return raw.map((t, i) => ({
+    id: `${idPrefix}:${i}`,
+    accountMask: t.accountMask,
+    accountRole: t.accountRole,
+    postedDate: t.postedDate,
+    descriptionRaw: t.descriptionRaw,
+    descriptionNorm: t.descriptionNorm,
+    label: t.label,
+    amountCents: t.amountCents,
+    runningBalanceCents: t.runningBalanceCents,
+    type: t.type,
+    dedupeKey: t.dedupeKey,
+    needsReview: t.needsReview,
+  }));
 }
 
 export function parseStatement(text: string): ParseResult {
