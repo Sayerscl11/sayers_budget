@@ -1,6 +1,10 @@
 import { withBuckets } from '@core/engine';
 import { formatCurrency } from '@core/money';
 import { loadBudgetData } from '@/lib/data/source';
+import { loadMembers } from '@/lib/data/members';
+import { useSupabaseData } from '@/lib/env';
+import { QuickAdd } from './QuickAdd';
+import { CategoryTag } from './CategoryTag';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,7 +26,11 @@ function dayHeading(iso: string): string {
 }
 
 export default async function TransactionsPage() {
-  const { txns, accounts } = await loadBudgetData();
+  const [{ txns, accounts, today }, members] = await Promise.all([
+    loadBudgetData(),
+    loadMembers(),
+  ]);
+  const live = useSupabaseData();
 
   // Show the household's checking-side ledger; pool "mirror" rows are noise.
   const rows = withBuckets(txns, accounts)
@@ -39,7 +47,7 @@ export default async function TransactionsPage() {
       <h1 className="mb-4 text-lg font-semibold text-slate-900">Activity</h1>
       {rows.length === 0 ? (
         <p className="rounded-xl bg-white p-4 text-sm text-slate-400 ring-1 ring-slate-100">
-          No transactions yet. Import a statement to get started.
+          No transactions yet. {live ? 'Tap + to log one, or import a statement.' : 'Import a statement to get started.'}
         </p>
       ) : (
         <div className="space-y-5">
@@ -51,6 +59,7 @@ export default async function TransactionsPage() {
               <ul className="divide-y divide-slate-100 rounded-xl bg-white ring-1 ring-slate-100">
                 {items.map((t) => {
                   const out = t.amountCents < 0;
+                  const discretionary = t.bucket === 'discretionary';
                   return (
                     <li key={t.id} className="flex items-center gap-3 px-4 py-3">
                       <div className="min-w-0 flex-1">
@@ -58,9 +67,13 @@ export default async function TransactionsPage() {
                           {t.label || t.descriptionNorm || t.descriptionRaw}
                         </p>
                         <div className="mt-0.5 flex items-center gap-2">
-                          <span className="text-[11px] text-slate-400">
-                            {BUCKET_LABEL[t.bucket] ?? t.bucket}
-                          </span>
+                          {discretionary ? (
+                            <CategoryTag id={t.id} label={t.label ?? null} editable={live} />
+                          ) : (
+                            <span className="text-[11px] text-slate-400">
+                              {BUCKET_LABEL[t.bucket] ?? t.bucket}
+                            </span>
+                          )}
                           {t.needsReview && (
                             <span className="rounded bg-amber-100 px-1.5 text-[10px] font-medium text-amber-800">
                               review
@@ -84,6 +97,8 @@ export default async function TransactionsPage() {
           ))}
         </div>
       )}
+
+      {live && <QuickAdd members={members} today={today} />}
     </div>
   );
 }
