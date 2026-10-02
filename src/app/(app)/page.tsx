@@ -3,104 +3,131 @@ import {
   detectRecurring,
   buildRecurringRows,
   rowsToForecastItems,
+  envelopeStatuses,
+  monthlySpendByCategory,
 } from '@core/engine';
 import { formatCurrency } from '@core/money';
 import { loadBudgetData } from '@/lib/data/source';
 import { loadRecurringOverrides } from '@/lib/data/recurring';
-import { WeeklyProgress } from '@/components/dashboard/WeeklyProgress';
+import { loadEnvelopeBudgets } from '@/lib/data/envelopes';
+import { useSupabaseData } from '@/lib/env';
 import { BreakdownSheet } from '@/components/dashboard/BreakdownSheet';
+import { EnvelopeCard } from './EnvelopeCard';
+import { EnvelopeAdder } from './EnvelopeAdder';
 
-// Always recompute from the latest data.
 export const dynamic = 'force-dynamic';
 
-function prettyRange(start: string, end: string): string {
-  const fmt = (iso: string) =>
-    new Date(iso + 'T00:00:00Z').toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      timeZone: 'UTC',
-    });
-  return `${fmt(start)} – ${fmt(end)}`;
-}
-
 export default async function DashboardPage() {
-  const [{ txns, accounts, household, today }, overrides] = await Promise.all([
+  const [{ txns, accounts, household, today }, overrides, budgets] = await Promise.all([
     loadBudgetData(),
     loadRecurringOverrides(),
+    loadEnvelopeBudgets(),
   ]);
-  // The forecast honors the user's confirmed/edited recurring items; with none
-  // saved this is identical to pure detection.
+  const live = useSupabaseData();
+  const month = today.slice(0, 7);
+  const monthName = new Date(today + 'T00:00:00Z').toLocaleDateString('en-US', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+
+  // Weekly "pace" number (the top strip), honoring confirmed recurring items.
   const recurringItems = rowsToForecastItems(
     buildRecurringRows(detectRecurring(txns, accounts), overrides),
   );
   const f = forecast({ txns, accounts, household, today, recurringItems });
-  const { perWeekCents, weekly, safeToSpend, savings, week } = f;
+  const monthlyAvailableCents = Math.round((f.perWeekCents * 52) / 12);
+
+  // Envelopes for this month.
+  const statuses = envelopeStatuses(txns, accounts, budgets, month);
+  const cards = budgets
+    .map((b, i) => ({ budget: b, status: statuses[i] }))
+    .sort(
+      (a, b) =>
+        Number(b.status.overspent) - Number(a.status.overspent) ||
+        a.status.remainingCents - b.status.remainingCents,
+    );
+  const totalRemaining = statuses.reduce((s, e) => s + e.remainingCents, 0);
+  const totalSpent = statuses.reduce((s, e) => s + e.spentThisMonthCents, 0);
+
+  const budgeted = new Set(budgets.map((b) => b.category));
+  const unbudgeted = monthlySpendByCategory(txns, accounts, month).filter(
+    (s) => !budgeted.has(s.category),
+  );
 
   return (
     <div className="px-4 py-6">
-      <header className="mb-1 flex items-baseline justify-between">
-        <h1 className="text-lg font-semibold text-slate-900">This week</h1>
-        <span className="text-xs text-slate-400">{prettyRange(week.start, week.end)}</span>
+      <header className="mb-3 flex items-baseline justify-between">
+        <h1 className="text-lg font-semibold text-slate-900">{monthName}</h1>
       </header>
 
-      {/* Hero: the one number. */}
-      <section className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-100">
-        <p className="text-center text-sm font-medium text-slate-500">Safe to spend</p>
-        <p className="mt-1 text-center text-5xl font-bold tracking-tight text-brand">
-          {formatCurrency(perWeekCents, { showCents: false })}
-          <span className="text-xl font-semibold text-slate-400"> /wk</span>
-        </p>
-
-        <div className="mt-6">
-          <WeeklyProgress spentCents={weekly.spentCents} perWeekCents={perWeekCents} />
+      {/* Weekly pace strip — the "am I on track" number above the envelopes. */}
+      <section className="mb-4 rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-100">
+        <div className="flex items-end justify-between">
+          <div>
+            <p className="text-xs font-medium text-slate-500">Safe to spend</p>
+            <p className="text-3xl font-bold tracking-tight text-brand">
+              {formatCurrency(f.perWeekCents, { showCents: false })}
+              <span className="text-base font-semibold text-slate-400">/wk</span>
+            </p>
+          </div>
+          <p className="pb-1 text-right text-xs text-slate-400">
+            ≈ {formatCurrency(monthlyAvailableCents, { showCents: false })}/mo
+            <br />
+            to spend
+          </p>
         </div>
-
         <BreakdownSheet
-          incomeCents={safeToSpend.incomeCents}
-          billsCents={safeToSpend.billsCents}
-          netCents={safeToSpend.netCents}
-          weeks={safeToSpend.weeks}
+          incomeCents={f.safeToSpend.incomeCents}
+          billsCents={f.safeToSpend.billsCents}
+          netCents={f.safeToSpend.netCents}
+          weeks={f.safeToSpend.weeks}
         />
       </section>
 
-      {/* This week's spend, by the household's own labels. */}
-      <section className="mt-5">
-        <h2 className="mb-2 text-sm font-semibold text-slate-700">Spent this week</h2>
-        {weekly.byCategory.length === 0 ? (
-          <p className="rounded-xl bg-white p-4 text-sm text-slate-400 ring-1 ring-slate-100">
-            Nothing logged yet this week.
+      {/* Envelopes — the main view. */}
+      <section>
+        <div className="mb-2 flex items-baseline justify-between">
+          <h2 className="text-sm font-semibold text-slate-700">This month’s budget</h2>
+          {cards.length > 0 && (
+            <span className={`text-sm font-semibold ${totalRemaining < 0 ? 'text-red-600' : 'text-slate-900'}`}>
+              {formatCurrency(totalRemaining, { showCents: false })} left
+            </span>
+          )}
+        </div>
+
+        {cards.length === 0 ? (
+          <p className="mb-3 rounded-xl bg-white p-4 text-sm text-slate-400 ring-1 ring-slate-100">
+            No category budgets yet. {live ? 'Add one below, or let the app suggest budgets from your spending.' : 'Connect Supabase to set your own.'}
           </p>
         ) : (
-          <ul className="divide-y divide-slate-100 rounded-xl bg-white ring-1 ring-slate-100">
-            {weekly.byCategory.map((c) => (
-              <li key={c.category} className="flex items-center justify-between px-4 py-3">
-                <span className="text-sm text-slate-700">
-                  {c.category}
-                  <span className="ml-2 text-xs text-slate-400">
-                    {c.count} {c.count === 1 ? 'item' : 'items'}
-                  </span>
-                </span>
-                <span className="text-sm font-medium text-slate-900">
-                  {formatCurrency(c.spentCents)}
-                </span>
-              </li>
+          <div className="space-y-2.5">
+            {cards.map(({ budget, status }) => (
+              <EnvelopeCard
+                key={status.category}
+                status={status}
+                startMonth={budget.startMonth}
+                editable={live}
+              />
             ))}
-          </ul>
+            <p className="px-1 pt-1 text-[11px] text-slate-400">
+              {formatCurrency(totalSpent)} spent across your envelopes this month.
+            </p>
+          </div>
         )}
       </section>
 
-      {/* Savings — explicitly separate from the weekly number. */}
-      <section className="mt-5 rounded-xl bg-white p-4 ring-1 ring-slate-100">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-slate-700">Saved so far</h2>
-          <span className="text-sm font-semibold text-emerald-600">
-            {formatCurrency(savings.contributedCents, { showCents: false })}
-          </span>
-        </div>
-        <p className="mt-1 text-xs text-slate-400">
-          Across {savings.count} contributions. Doesn’t reduce your weekly number.
+      {live && (
+        <section className="mt-4">
+          <EnvelopeAdder startMonth={month} unbudgeted={unbudgeted} />
+        </section>
+      )}
+
+      {!live && unbudgeted.length > 0 && (
+        <p className="mt-4 text-center text-[11px] text-slate-400">
+          Demo budgets are suggested from the sample spending.
         </p>
-      </section>
+      )}
     </div>
   );
 }

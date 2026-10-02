@@ -92,6 +92,18 @@ export function monthRangeContaining(iso: string): DateRange {
   return { start: formatISO(start), end: formatISO(end) };
 }
 
+/** The `yyyy-mm` month key of an ISO date. */
+export function monthKey(iso: string): string {
+  return iso.slice(0, 7);
+}
+
+/** Whole-month difference b - a between two `yyyy-mm` keys (can be negative). */
+export function monthDiff(aYM: string, bYM: string): number {
+  const [ay, am] = aYM.split('-').map(Number);
+  const [by, bm] = bYM.split('-').map(Number);
+  return by * 12 + bm - (ay * 12 + am);
+}
+
 /** Median of the gaps (in days) between consecutive sorted dates. */
 export function medianGapDays(isoDates: string[]): number {
   if (isoDates.length < 2) return 0;

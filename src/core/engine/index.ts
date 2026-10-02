@@ -26,3 +26,6 @@ export type { ForecastInput, DashboardForecast } from './forecast';
 
 export { buildRecurringRows, rowsToForecastItems } from './recurringPlan';
 export type { RecurringOverride, RecurringRow } from './recurringPlan';
+
+export { envelopeStatuses, monthlySpendByCategory, suggestEnvelopes } from './envelopes';
+export type { EnvelopeBudget, EnvelopeStatus, MonthlyCategorySpend } from './envelopes';
