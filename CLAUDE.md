@@ -4,10 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A weekly **"safe-to-spend"** household budgeting app (Coty & Kia Sayers). It
-forecasts from constant recurring income/bills and shows one number — how much
-is free to spend on personal stuff this week — that auto-adjusts as spending is
-logged. Ingests transactions from Capital One 360 PDF statements, manual entry,
+A household budgeting app (Coty & Kia Sayers) built around **category
+envelopes with rollover** — a monthly cap per discretionary category
+(Groceries, Gas, Misc…) drawn down by labeled spend, matching how the household
+budgets in its spreadsheet. A weekly **"safe-to-spend"** number, forecast from
+constant recurring income/bills, sits on top of Home as a pace strip. Ingests transactions from Capital One 360 PDF statements, manual entry,
 and (later) Plaid. Stack: Next.js 15 App Router + React 19 + Tailwind, Supabase
 (Postgres + Auth + RLS), `pdfjs-dist`, `plaid`, Vitest.
 
@@ -121,6 +122,28 @@ consumes. Two settings in `next.config.mjs` are load-bearing: `pdfjs-dist` is in
 Server Action body limit is raised to 15mb for statement uploads. Flow:
 preview (`api/import/preview`) → `reconcileIngest` plan → `lib/ingest/persist.ts`.
 
+### Envelopes (`src/core/engine/envelopes.ts`)
+
+The main Home view. An envelope is a lens over the same `discretionary` bucket
+the classifier already produces — it never touches income, bills, or savings —
+and its `category` is matched against the transaction **label** (unlabeled
+spend falls under `Uncategorized`).
+
+- **Only the cap, rollover flag, and `start_month` are stored**
+  (`category_budgets`, migration `0007`). Spent/remaining is always derived
+  from transactions; don't add stored balance columns.
+- **Rollover math:** `available = cap × months since start (inclusive) − spend
+  in prior months`, `remaining = available − spent this month`. Without
+  rollover, `available` is just the cap. Months are `yyyy-mm` keys via
+  `monthKey` / `monthDiff` in `core/dates.ts`.
+- `suggestEnvelopes` proposes caps from history: average monthly spend rounded
+  to the nearest $10 (min $10), only for categories seen in ≥2 months. One-off
+  categories stay unbudgeted on purpose so Home can nudge "set a budget?" via
+  `monthlySpendByCategory`.
+- `lib/data/envelopes.ts` loads budgets; in demo mode it returns
+  `suggestEnvelopes` output so the view is populated with no DB. Writes
+  (`(app)/envelope-actions.ts`) are refused unless Supabase mode is on.
+
 ### Recurring overrides (`src/core/engine/recurringPlan.ts`)
 
 Pure merge of auto-detected candidates with the user's saved rows in
@@ -139,9 +162,10 @@ attribution. Re-importing an unchanged statement must be a complete no-op.
 
 ### Database (`supabase/migrations/`)
 
-Six ordered migrations (`0006` adds `household_invites`: the owner records the
+Seven ordered migrations. `0006` adds `household_invites`: the owner records the
 partner's email, and the server accepts the invite with the service role on
-that partner's first sign-in, since an invitee has no household for RLS yet). Every household-scoped table carries `household_id` and
+that partner's first sign-in, since an invitee has no household for RLS yet.
+`0007` adds `category_budgets` (envelope caps, `unique(household_id, category)`). Every household-scoped table carries `household_id` and
 its RLS policy is `household_id = current_household()`, where
 `current_household()` is a `SECURITY DEFINER` helper resolving `auth.uid()` →
 `memberships.household_id` (so both spouses share one budget). `transactions`
@@ -154,8 +178,8 @@ authenticated RLS policy** — only the service role reads it.
 M0/M1 (pure core) and most of M2 are done: `forecast()`, the Next.js app +
 dashboard, Supabase client wiring and live data source, email/password auth +
 household onboarding with invites, PDF ingest (extract → parse → dedupe →
-persist), the Recurring manager, and manual quick-add + tap-to-categorize on
-Activity. Remaining: M3 savings goals, M4 Plaid, M5 polish, and the Playwright
+persist), the Recurring manager, manual quick-add + tap-to-categorize on
+Activity, and envelope budgeting with rollover as the Home view. Remaining: M3 savings goals, M4 Plaid, M5 polish, and the Playwright
 happy-path. Full design is in `docs/PLAN.md`; `docs/HANDOFF.md` is the original
 M2 build order and is now mostly historical.
 
