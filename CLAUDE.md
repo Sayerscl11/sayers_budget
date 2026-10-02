@@ -22,14 +22,18 @@ npm run build                         # next build (full type-check of app + rou
 npm run dev                           # next dev (needs .env.local for Supabase paths)
 ```
 
-The app currently runs **with no database**: the data layer is backed by the
+By default the app runs **with no database**: the data layer is backed by the
 committed statement fixtures (see "Data source seam"), so `npm run build` /
-`npm run dev` and the dashboard work end-to-end out of the box.
+`npm run dev` and the dashboard work end-to-end out of the box. Setting
+`NEXT_PUBLIC_DATA_SOURCE=supabase` (plus the Supabase keys in `.env.local`)
+switches to live data and turns on auth, onboarding, and PDF import.
+
+`test:e2e` is declared in `package.json` but there is no Playwright config or
+`e2e/` folder yet.
 
 ### Validating SQL migrations without Supabase
 
-There is no live Supabase here. To genuinely test `supabase/migrations/*`, apply
-them to a throwaway local Postgres with a tiny `auth` shim (Supabase provides
+To test migrations without touching the live project, apply `supabase/migrations/*` to a throwaway local Postgres with a tiny `auth` shim (Supabase provides
 `auth.users` and `auth.uid()`):
 
 ```sql
@@ -99,10 +103,30 @@ bridges `RawTxn` → the engine's `Txn`.
 
 ### Data source seam (`src/lib/data/`)
 
-The UI calls `loadBudgetData()` (`source.ts`), never a DB directly. Today it
-returns the `demo` source (`demo.ts`, parses the committed fixtures). The
-Supabase-backed source drops in here with **no UI changes**. `demo.ts` anchors
+The UI calls `loadBudgetData()` (`source.ts`), never a DB directly. It returns
+the `demo` source (`demo.ts`, parses the committed fixtures) unless
+`useSupabaseData()` (`lib/env.ts`) is true, in which case it lazy-imports
+`supabase.ts` — lazily so the demo build never pulls in `next/headers`. Both
+return the same `BudgetData` shape, so the UI is identical. `demo.ts` anchors
 "today" to the latest transaction so the dashboard reflects real data.
+
+Auth, onboarding, and server actions are gated on Supabase mode; keep new
+write paths behind the same check so the demo build stays DB-free.
+
+### PDF import (`src/lib/pdf/extractText.ts`, `src/app/(app)/import/`)
+
+`extractText` turns an uploaded PDF into the newline text the pure parser
+consumes. Two settings in `next.config.mjs` are load-bearing: `pdfjs-dist` is in
+`serverExternalPackages` (bundling it breaks worker/font resolution), and the
+Server Action body limit is raised to 15mb for statement uploads. Flow:
+preview (`api/import/preview`) → `reconcileIngest` plan → `lib/ingest/persist.ts`.
+
+### Recurring overrides (`src/core/engine/recurringPlan.ts`)
+
+Pure merge of auto-detected candidates with the user's saved rows in
+`recurring_items` (confirm / edit / toggle in the Recurring manager). With zero
+overrides it must reproduce `defaultForecastItems` exactly, so edits only ever
+refine the same baseline number.
 
 ### Cross-source dedupe (`src/lib/ingest/reconcile.ts`)
 
@@ -115,7 +139,9 @@ attribution. Re-importing an unchanged statement must be a complete no-op.
 
 ### Database (`supabase/migrations/`)
 
-Five ordered migrations. Every household-scoped table carries `household_id` and
+Six ordered migrations (`0006` adds `household_invites`: the owner records the
+partner's email, and the server accepts the invite with the service role on
+that partner's first sign-in, since an invitee has no household for RLS yet). Every household-scoped table carries `household_id` and
 its RLS policy is `household_id = current_household()`, where
 `current_household()` is a `SECURITY DEFINER` helper resolving `auth.uid()` →
 `memberships.household_id` (so both spouses share one budget). `transactions`
@@ -125,14 +151,13 @@ authenticated RLS policy** — only the service role reads it.
 
 ## Milestone status
 
-M0/M1 (pure core) and the start of M2 are done: `forecast()` orchestrator, a
-runnable Next.js app + dashboard on the demo source, the validated Supabase
-schema, and the dedupe core. Still to do for M2: Supabase client wiring
-(`lib/supabase/*`, `lib/env.ts`), the ingest adapter that applies the reconcile
-plan + persists, PDF runtime extraction (`lib/pdf/extractText.ts`), server
-actions/auth, and swapping the data source from `demo` to `supabase`. Then M3
-savings goals, M4 Plaid, M5 polish. Full design is in `docs/PLAN.md`; running
-notes in `docs/HANDOFF.md`.
+M0/M1 (pure core) and most of M2 are done: `forecast()`, the Next.js app +
+dashboard, Supabase client wiring and live data source, email/password auth +
+household onboarding with invites, PDF ingest (extract → parse → dedupe →
+persist), the Recurring manager, and manual quick-add + tap-to-categorize on
+Activity. Remaining: M3 savings goals, M4 Plaid, M5 polish, and the Playwright
+happy-path. Full design is in `docs/PLAN.md`; `docs/HANDOFF.md` is the original
+M2 build order and is now mostly historical.
 
 ## Conventions
 
