@@ -5,24 +5,32 @@ import {
   rowsToForecastItems,
   envelopeStatuses,
   monthlySpendByCategory,
+  detectSubscriptions,
+  subscriptionForecastItems,
+  subscriptionMonth,
+  computePeriodTotals,
 } from '@core/engine';
 import { formatCurrency } from '@core/money';
 import { loadBudgetData } from '@/lib/data/source';
 import { loadRecurringOverrides } from '@/lib/data/recurring';
 import { loadEnvelopeBudgets } from '@/lib/data/envelopes';
+import { loadSubscriptionOverrides } from '@/lib/data/subscriptions';
 import { useSupabaseData } from '@/lib/env';
 import { BreakdownSheet } from '@/components/dashboard/BreakdownSheet';
 import { EnvelopeCard } from './EnvelopeCard';
 import { EnvelopeAdder } from './EnvelopeAdder';
+import { SubscriptionsCard } from './SubscriptionsCard';
 
 export const dynamic = 'force-dynamic';
 
 export default async function DashboardPage() {
-  const [{ txns, accounts, household, today }, overrides, budgets] = await Promise.all([
-    loadBudgetData(),
-    loadRecurringOverrides(),
-    loadEnvelopeBudgets(),
-  ]);
+  const [{ txns, accounts, household, today }, overrides, budgets, subOverrides] =
+    await Promise.all([
+      loadBudgetData(),
+      loadRecurringOverrides(),
+      loadEnvelopeBudgets(),
+      loadSubscriptionOverrides(),
+    ]);
   const live = useSupabaseData();
   const month = today.slice(0, 7);
   const monthName = new Date(today + 'T00:00:00Z').toLocaleDateString('en-US', {
@@ -32,10 +40,16 @@ export default async function DashboardPage() {
   });
 
   // Weekly "pace" number (the top strip), honoring confirmed recurring items.
-  const recurringItems = rowsToForecastItems(
-    buildRecurringRows(detectRecurring(txns, accounts), overrides),
-  );
+  // Subscriptions are set aside as monthly bills before anything is "safe".
+  const subs = detectSubscriptions(txns, subOverrides);
+  const subItems = subscriptionForecastItems(subs);
+  const recurringItems = [
+    ...rowsToForecastItems(buildRecurringRows(detectRecurring(txns, accounts), overrides)),
+    ...subItems,
+  ];
   const f = forecast({ txns, accounts, household, today, recurringItems });
+  const subscriptionsCents = computePeriodTotals(subItems, f.period).billsCents;
+  const subMonth = subscriptionMonth(subs, txns, month);
   const monthlyAvailableCents = Math.round((f.perWeekCents * 52) / 12);
 
   // Envelopes for this month.
@@ -80,10 +94,13 @@ export default async function DashboardPage() {
         <BreakdownSheet
           incomeCents={f.safeToSpend.incomeCents}
           billsCents={f.safeToSpend.billsCents}
+          subscriptionsCents={subscriptionsCents}
           netCents={f.safeToSpend.netCents}
           weeks={f.safeToSpend.weeks}
         />
       </section>
+
+      {subMonth.count > 0 && <SubscriptionsCard month={subMonth} />}
 
       {/* Envelopes — the main view. */}
       <section>

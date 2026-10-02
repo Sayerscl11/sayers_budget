@@ -108,7 +108,10 @@ The UI calls `loadBudgetData()` (`source.ts`), never a DB directly. It returns
 the `demo` source (`demo.ts`, parses the committed fixtures) unless
 `useSupabaseData()` (`lib/env.ts`) is true, in which case it lazy-imports
 `supabase.ts` — lazily so the demo build never pulls in `next/headers`. Both
-return the same `BudgetData` shape, so the UI is identical. `demo.ts` anchors
+return the same `BudgetData` shape, so the UI is identical. Transactions are
+loaded through `fetchAllRows` (`lib/db/paginate.ts`): Supabase silently caps a
+request at 1,000 rows, and any new query that must see the whole ledger has to
+page the same way. `demo.ts` anchors
 "today" to the latest transaction so the dashboard reflects real data.
 
 Auth, onboarding, and server actions are gated on Supabase mode; keep new
@@ -144,6 +147,32 @@ spend falls under `Uncategorized`).
   `suggestEnvelopes` output so the view is populated with no DB. Writes
   (`(app)/envelope-actions.ts`) are refused unless Supabase mode is on.
 
+### Subscriptions (`src/core/engine/subscriptions.ts`, `merchant.ts`)
+
+`detectRecurring` only sees the main checking account, but subscriptions are
+charged to the debit card — the one place the engine reads the spending-pool
+account instead of treating it as a mirror. It takes "Debit/Digital Card
+Purchase" outflows, groups them by `cardMerchant()` stem, splits each merchant
+into price streams (within 10% or $1, so Apple's two charges stay separate and a
+price rise doesn't split one), and keeps streams with at most one charge per
+month whose gaps are whole months ±6 days (so a missing statement doesn't break
+a streak). Two charges only count if the price matches to the cent.
+
+- `cardMerchant()` derives its own stem from `descriptionRaw`. **Do not change
+  `descriptionNorm` to improve grouping** — it feeds `dedupeKey`, and changing
+  it would re-import every existing row as new.
+- "Current" is measured against the newest card purchase on file, not the
+  calendar, so a statement that hasn't been imported yet doesn't make
+  everything look cancelled. Lapsed ones are listed but not counted.
+- Counted subscriptions are appended to the forecast as monthly bills on Home
+  (`subscriptionForecastItems`), so they come off the weekly number. The card
+  transfers that fund them still count as discretionary envelope spend; the
+  two lenses are not reconciled.
+- Only the count/don't-count decision is stored: `recurring_items` with
+  `direction = 'subscription'` and `match_norm` = the engine's key (migration
+  `0008`). `loadRecurringOverrides` filters these out so they never reach
+  `buildRecurringRows`.
+
 ### Recurring overrides (`src/core/engine/recurringPlan.ts`)
 
 Pure merge of auto-detected candidates with the user's saved rows in
@@ -162,10 +191,11 @@ attribution. Re-importing an unchanged statement must be a complete no-op.
 
 ### Database (`supabase/migrations/`)
 
-Seven ordered migrations. `0006` adds `household_invites`: the owner records the
+Eight ordered migrations. `0006` adds `household_invites`: the owner records the
 partner's email, and the server accepts the invite with the service role on
 that partner's first sign-in, since an invitee has no household for RLS yet.
-`0007` adds `category_budgets` (envelope caps, `unique(household_id, category)`). Every household-scoped table carries `household_id` and
+`0007` adds `category_budgets` (envelope caps, `unique(household_id, category)`).
+`0008` widens the `recurring_items.direction` check to allow `'subscription'`. Every household-scoped table carries `household_id` and
 its RLS policy is `household_id = current_household()`, where
 `current_household()` is a `SECURITY DEFINER` helper resolving `auth.uid()` →
 `memberships.household_id` (so both spouses share one budget). `transactions`
@@ -179,7 +209,8 @@ M0/M1 (pure core) and most of M2 are done: `forecast()`, the Next.js app +
 dashboard, Supabase client wiring and live data source, email/password auth +
 household onboarding with invites, PDF ingest (extract → parse → dedupe →
 persist), the Recurring manager, manual quick-add + tap-to-categorize on
-Activity, and envelope budgeting with rollover as the Home view. Remaining: M3 savings goals, M4 Plaid, M5 polish, and the Playwright
+Activity, envelope budgeting with rollover as the Home view, and subscription
+detection from debit-card purchases. Remaining: M3 savings goals, M4 Plaid, M5 polish, and the Playwright
 happy-path. Full design is in `docs/PLAN.md`; `docs/HANDOFF.md` is the original
 M2 build order and is now mostly historical.
 

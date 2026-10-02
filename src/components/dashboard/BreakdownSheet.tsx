@@ -8,11 +8,15 @@ import { formatCurrency } from '@core/money';
 export function BreakdownSheet({
   incomeCents,
   billsCents,
+  subscriptionsCents = 0,
   netCents,
   weeks,
 }: {
   incomeCents: number;
+  /** All projected bills for the period, subscriptions included. */
   billsCents: number;
+  /** The subscriptions share of `billsCents`, shown on its own line. */
+  subscriptionsCents?: number;
   netCents: number;
   weeks: number;
 }) {
@@ -32,7 +36,13 @@ export function BreakdownSheet({
       {open && (
         <dl className="mt-3 space-y-2 rounded-xl bg-slate-50 p-4 text-sm">
           <Row label="Recurring income" value={formatCurrency(incomeCents)} />
-          <Row label="Recurring bills" value={`−${formatCurrency(billsCents)}`} />
+          <Row
+            label="Recurring bills"
+            value={`−${formatCurrency(billsCents - subscriptionsCents)}`}
+          />
+          {subscriptionsCents > 0 && (
+            <Row label="Subscriptions" value={`−${formatCurrency(subscriptionsCents)}`} />
+          )}
           <Row label="Net for the period" value={formatCurrency(netCents)} strong />
           <Row label="÷ weeks in period" value={weeks.toFixed(2)} />
           <p className="pt-1 text-xs text-slate-400">

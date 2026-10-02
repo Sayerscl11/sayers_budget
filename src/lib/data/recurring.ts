@@ -13,7 +13,9 @@ export async function loadRecurringOverrides(): Promise<RecurringOverride[]> {
     .from('recurring_items')
     .select(
       'direction, match_norm, cadence, anchor_date, amount_cents, amount_source, is_active, is_savings',
-    );
+    )
+    // Subscriptions share this table but are a separate lens (see subscriptions.ts).
+    .in('direction', ['income', 'bill']);
 
   return ((data ?? []) as unknown as Array<{
     direction: RecurringDirection;

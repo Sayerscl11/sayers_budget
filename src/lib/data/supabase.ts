@@ -4,6 +4,7 @@
 
 import { createClient } from '../supabase/server';
 import { HOUSEHOLD } from '../household';
+import { fetchAllRows } from '../db/paginate';
 import {
   dbAccountToRef,
   dbRowToTxn,
@@ -15,10 +16,12 @@ import type { BudgetData } from './source';
 export async function loadSupabaseData(): Promise<BudgetData> {
   const supabase = await createClient();
 
-  const [{ data: accountRows }, { data: txnRows }, { data: households }] =
-    await Promise.all([
-      supabase.from('accounts').select('id, mask, name, role'),
-      supabase
+  const [{ data: accountRows }, txnRows, { data: households }] = await Promise.all([
+    supabase.from('accounts').select('id, mask, name, role'),
+    // Paged: a single request stops at 1,000 rows, which would silently drop
+    // the NEWEST transactions once the ledger grows past that.
+    fetchAllRows(async (from, to) => {
+      const { data, error } = await supabase
         .from('transactions')
         .select(
           'id, account_id, posted_date, description_raw, description_norm, label, ' +
@@ -27,15 +30,21 @@ export async function loadSupabaseData(): Promise<BudgetData> {
         )
         // Superseded rows are kept for audit but excluded from the budget view.
         .is('superseded_by', null)
-        .order('posted_date', { ascending: true }),
-      supabase.from('households').select('timezone, week_start_dow').limit(1),
-    ]);
+        .order('posted_date', { ascending: true })
+        // Tie-break so rows can't shuffle between pages.
+        .order('id', { ascending: true })
+        .range(from, to);
+      if (error) throw new Error(`Could not load transactions: ${error.message}`);
+      return data ?? [];
+    }),
+    supabase.from('households').select('timezone, week_start_dow').limit(1),
+  ]);
 
   // Cast through `unknown`: without generated DB types the client returns a
   // loose row shape. (A future `supabase gen types` pass tightens this.)
   const accounts = (accountRows ?? []) as unknown as DbAccountRow[];
   const accountsById = new Map(accounts.map((a) => [a.id, a]));
-  const txns = ((txnRows ?? []) as unknown as DbTxnRow[]).map((r) =>
+  const txns = (txnRows as unknown as DbTxnRow[]).map((r) =>
     dbRowToTxn(r, accountsById),
   );
 

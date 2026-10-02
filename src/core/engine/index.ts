@@ -29,3 +29,14 @@ export type { RecurringOverride, RecurringRow } from './recurringPlan';
 
 export { envelopeStatuses, monthlySpendByCategory, suggestEnvelopes } from './envelopes';
 export type { EnvelopeBudget, EnvelopeStatus, MonthlyCategorySpend } from './envelopes';
+
+export { cardMerchant, isCardPurchase } from './merchant';
+export type { Merchant } from './merchant';
+
+export {
+  detectSubscriptions,
+  subscriptionMonthlyCents,
+  subscriptionMonth,
+  subscriptionForecastItems,
+} from './subscriptions';
+export type { Subscription, SubscriptionOverride, SubscriptionMonth } from './subscriptions';

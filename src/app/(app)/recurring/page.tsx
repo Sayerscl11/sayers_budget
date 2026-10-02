@@ -1,8 +1,17 @@
-import { detectRecurring, buildRecurringRows, type RecurringRow } from '@core/engine';
+import {
+  detectRecurring,
+  buildRecurringRows,
+  detectSubscriptions,
+  subscriptionMonthlyCents,
+  type RecurringRow,
+} from '@core/engine';
+import { formatCurrency } from '@core/money';
 import { loadBudgetData } from '@/lib/data/source';
 import { loadRecurringOverrides } from '@/lib/data/recurring';
 import { useSupabaseData } from '@/lib/env';
+import { loadSubscriptionOverrides } from '@/lib/data/subscriptions';
 import { RecurringItemRow } from './RecurringItemRow';
+import { SubscriptionRow } from './SubscriptionRow';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,10 +37,12 @@ function Section({
 }
 
 export default async function RecurringPage() {
-  const [{ txns, accounts }, overrides] = await Promise.all([
+  const [{ txns, accounts }, overrides, subOverrides] = await Promise.all([
     loadBudgetData(),
     loadRecurringOverrides(),
+    loadSubscriptionOverrides(),
   ]);
+  const subs = detectSubscriptions(txns, subOverrides);
   const editable = useSupabaseData();
   const rows = buildRecurringRows(detectRecurring(txns, accounts), overrides);
 
@@ -52,6 +63,36 @@ export default async function RecurringPage() {
 
       <Section title="Income" accent="text-emerald-700" rows={income} editable={editable} />
       <Section title="Bills" accent="text-slate-700" rows={bills} editable={editable} />
+
+      <section id="subscriptions" className="mb-6 scroll-mt-4">
+        <div className="mb-2 flex items-baseline justify-between">
+          <h2 className="text-sm font-semibold text-slate-700">Subscriptions</h2>
+          {subs.length > 0 && (
+            <span className="text-sm font-semibold tabular-nums text-slate-900">
+              {formatCurrency(subscriptionMonthlyCents(subs))}
+              <span className="font-normal text-slate-400">/mo</span>
+            </span>
+          )}
+        </div>
+        {subs.length === 0 ? (
+          <p className="px-1 text-sm text-slate-400">
+            None found yet. They show up once the same charge has hit your debit card two
+            months running.
+          </p>
+        ) : (
+          <>
+            <ul className="divide-y divide-slate-100 rounded-xl bg-white ring-1 ring-slate-100">
+              {subs.map((s) => (
+                <SubscriptionRow key={s.key} sub={s} editable={editable} />
+              ))}
+            </ul>
+            <p className="px-1 pt-2 text-[11px] text-slate-400">
+              Found on your debit card: the same charge, about once a month. Switched-on
+              ones are set aside before your weekly number.
+            </p>
+          </>
+        )}
+      </section>
     </div>
   );
 }

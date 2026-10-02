@@ -21,6 +21,57 @@ export interface SaveRecurringInput {
   isSavings: boolean;
 }
 
+export interface SaveSubscriptionInput {
+  key: string;
+  name: string;
+  amountCents: number;
+  lastDate: string;
+  included: boolean;
+}
+
+/**
+ * Save whether a detected subscription counts toward the monthly total and the
+ * forecast. Stored in recurring_items under direction 'subscription'.
+ */
+export async function saveSubscription(
+  input: SaveSubscriptionInput,
+): Promise<{ error?: string }> {
+  if (!useSupabaseData()) return { error: 'Connect Supabase to save changes.' };
+  const householdId = await getMembershipHousehold();
+  if (!householdId) return { error: 'No household found.' };
+
+  const supabase = await createClient();
+  const { error } = await supabase.from('recurring_items').upsert(
+    {
+      household_id: householdId,
+      direction: 'subscription',
+      match_norm: input.key,
+      name: input.name,
+      cadence: 'monthly',
+      anchor_date: input.lastDate,
+      amount_cents: input.amountCents,
+      detected_amount_cents: input.amountCents,
+      is_active: input.included,
+      auto_detected: true,
+      confirmed: true,
+    },
+    { onConflict: 'household_id,direction,match_norm' },
+  );
+  if (error) {
+    // 23514 = check violation: the direction constraint predates migration 0008.
+    return {
+      error:
+        error.code === '23514'
+          ? 'Apply migration 0008_subscriptions.sql in Supabase, then try again.'
+          : error.message,
+    };
+  }
+
+  revalidatePath('/');
+  revalidatePath('/recurring');
+  return {};
+}
+
 /**
  * Upsert one recurring item (keyed by household + direction + match_norm). Used
  * for every edit on the Recurring manager: toggling active, overriding an
